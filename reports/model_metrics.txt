@@ -1,0 +1,132 @@
+==============================================================================================
+MODEL METRICS — Short-Term ICU Capacity Stress Early Warning Using State-Level Hospital Data
+==============================================================================================
+
+
+1. PROJECT OVERVIEW
+------------------------------------------------------------------------
+Project Title:        Hospital Capacity Early-Warning System
+State Analyzed:       California
+Forecast Horizon:     1-7 days
+Stress Definition:    85th percentile of adult ICU bed utilization
+Probability Threshold: 0.5
+
+
+2. DATA SUMMARY
+------------------------------------------------------------------------
+Regime Cutoff:        2022-06-01 (post-Omicron)
+Date Range:           2022-06-01 to 2024-04-27
+Total Observations:   697 (after cutoff)
+Training Window:      358 rows (2022-06-08 to 2023-05-31)
+Test Window:          325 rows (2023-06-01 to 2024-04-20)
+Training Stress Rate: 28.77%
+Test Stress Rate:     15.08%
+
+
+3. FINAL MODEL SPECIFICATION
+------------------------------------------------------------------------
+
+--- feature_eng_modeling.ipynb ---
+
+Model v1 — Logistic Regression (Signals Only)
+
+  Pipeline:
+    - StandardScaler
+    - LogisticRegression (default parameters)
+
+  Features (all log1p-transformed):
+    - icu_patients_confirmed_influenza (log1p)
+    - total_patients_hospitalized_confirmed_influenza (log1p)
+    - previous_day_admission_influenza_confirmed (log1p)
+    - previous_day_admission_adult_covid_confirmed_and_suspected (log1p)
+    - inpatient_beds_used_covid (log1p)
+
+Model v2 — Logistic Regression (Signals + Momentum + Smoothed)
+
+  Pipeline:
+    - StandardScaler
+    - LogisticRegression (default parameters)
+
+  Features (all log1p-transformed):
+    - icu_patients_confirmed_influenza (log1p)
+    - total_patients_hospitalized_confirmed_influenza (log1p)
+    - previous_day_admission_influenza_confirmed (log1p)
+    - previous_day_admission_adult_covid_confirmed_and_suspected (log1p)
+    - inpatient_beds_used_covid (log1p)
+    - icu_patients_confirmed_influenza_rol_7 (log1p) — 7-day rolling mean
+    - total_patients_hospitalized_confirmed_influenza_rol_7 (log1p) — 7-day rolling mean
+    - previous_day_admission_influenza_confirmed_rol_7 (log1p) — 7-day rolling mean
+    - previous_day_admission_adult_covid_confirmed_and_suspected_rol_7 (log1p) — 7-day rolling mean
+    - inpatient_beds_used_covid_rol_7 (log1p) — 7-day rolling mean
+    - adult_icu_bed_utilization_daily_change (log1p) — ICU utilization daily change
+
+--- icu_stress_early_warning_modeling.ipynb ---
+
+Controlled Experiment Model — Logistic Regression (Minimal ICU Features)
+
+  Pipeline:
+    - StandardScaler
+    - LogisticRegression(max_iter=1000, random_state=42)
+
+  Features:
+    - util_mean_7 — 7-day backward-looking rolling mean of ICU utilization
+    - util_diff_mean_7 — 7-day backward-looking rolling mean of daily utilization change
+
+
+4. PERFORMANCE METRICS (TEST SET ONLY)
+------------------------------------------------------------------------
+
+--- feature_eng_modeling.ipynb (expanding-window walk-forward) ---
+
+Baseline (Rolling 7-Day Max Persistence):
+  Accuracy:           0.9122
+  Precision:          0.7586
+  Recall:             0.7586
+  F1 Score:           0.7586
+  AUC-ROC:            0.8525
+  Avg Lead Time:      3.5 days
+
+Model v1 (Signals Only):
+  Accuracy:           0.9436
+  Precision:          0.7857
+  Recall:             0.9483
+  F1 Score:           0.8594
+  AUC-ROC:            0.9454
+  Avg Lead Time:      4.5 days
+
+Model v2 (Signals + Momentum + Smoothed):
+  Accuracy:           0.9436
+  Precision:          0.7632
+  Recall:             1.0000
+  F1 Score:           0.8657
+  AUC-ROC:            0.9655
+  Avg Lead Time:      4.0 days
+
+--- icu_stress_early_warning_modeling.ipynb (strict train/test split) ---
+
+Heuristic Baseline (Proximity + Positive Trend):
+  Precision:          0.7586
+  Recall:             0.4490
+  F1 Score:           0.5641
+  Avg Lead Time:      3.3 days
+  Episode Detection:  2/3 (67%)
+
+Logistic Regression (Minimal ICU Features):
+  Precision:          0.7736
+  Recall:             0.8367
+  F1 Score:           0.8039
+  AUC-ROC:            0.9757
+  Avg Lead Time:      4.3 days
+  Episode Detection:  3/3 (100%)
+
+
+5. VALIDATION METHOD
+------------------------------------------------------------------------
+- Expanding-window walk-forward validation (feature_eng_modeling)
+- Strict chronological train/test split (icu_stress_early_warning_modeling)
+- Initial 365-day training window
+- Forward-looking 7-day label construction (max utilization in t+1 to t+7)
+- Backward-looking feature windows (rolling 7-day, center=False, min_periods=7)
+- Stress threshold locked to training window only (no recomputation)
+- No temporal leakage: features use data <= t, labels use data t+1 to t+7
+- No time-series shuffling
